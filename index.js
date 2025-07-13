@@ -7,13 +7,13 @@ const pixelmatch = require("pixelmatch");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 👧 Reference: Girl bot (gray skin version)
+// 👧 Girl bot reference avatar (gray skin tone)
 const REFERENCE_USER_ID = 5514808927;
 
 let referenceImage = null;
 
 app.get("/", (req, res) => {
-    res.send("🟢 Girl Image Kicker (Gray Skin Compatible) is Running");
+    res.send("🟢 Girl Image Kicker (Relaxed Grayscale Match) is Running");
 });
 
 async function fetchAvatarHeadshot(userId) {
@@ -24,7 +24,7 @@ async function fetchAvatarHeadshot(userId) {
     return imageBuffer.data;
 }
 
-function compareImages(refImg, targetImg, regionStart, regionEnd, threshold = 0.2, maxDiff = 0.1) {
+function compareImages(refImg, targetImg, regionStart, regionEnd, threshold = 0.3, maxDiff = 0.2) {
     const width = refImg.width;
     const height = regionEnd - regionStart;
 
@@ -64,9 +64,9 @@ async function isCloneAvatar(targetBuffer) {
     const refPNG = PNG.sync.read(refGray);
     const targetPNG = PNG.sync.read(targetGray);
 
-    const matchHair = compareImages(refPNG, targetPNG, 0, 50);
-    const matchShirt = compareImages(refPNG, targetPNG, 50, 100);
-    const matchPants = compareImages(refPNG, targetPNG, 100, 150);
+    const matchHair = compareImages(refPNG, targetPNG, 0, 50, 0.3, 0.2);
+    const matchShirt = compareImages(refPNG, targetPNG, 50, 100, 0.3, 0.2);
+    const matchPants = compareImages(refPNG, targetPNG, 100, 150, 0.3, 0.2);
 
     return matchHair && matchShirt && matchPants;
 }
@@ -85,7 +85,7 @@ app.get("/compare/:userid", async (req, res) => {
 });
 
 app.listen(PORT, async () => {
-    console.log(`✅ Gray-Skin Image Kicker running on port ${PORT}`);
+    console.log(`✅ Girl Kicker (Relaxed Match) running on port ${PORT}`);
     try {
         referenceImage = await fetchAvatarHeadshot(REFERENCE_USER_ID);
         console.log("✅ Reference avatar loaded (grayscale ready)");
