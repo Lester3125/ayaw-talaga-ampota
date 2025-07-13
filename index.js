@@ -1,94 +1,95 @@
 const express = require("express");
 const axios = require("axios");
+const sharp = require("sharp");
+const { PNG } = require("pngjs");
+const pixelmatch = require("pixelmatch");
+
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-const referenceIds = [5640264805, 8914927540];
-const grayOrWhiteColors = [1, 194, 208, 102, 119085916, 119085909]; // more flexible gray/white/brown range
+// 👧 Reference: Girl bot (gray skin version)
+const REFERENCE_USER_ID = 5514808927;
 
-function isGrayOrWhiteSkin(description) {
-  try {
-    const parts = [
-      description.headColorId,
-      description.leftArmColorId,
-      description.rightArmColorId,
-      description.leftLegColorId,
-      description.rightLegColorId,
-      description.torsoColorId
-    ];
-    return parts.every(color => grayOrWhiteColors.includes(color));
-  } catch (err) {
-    console.warn("⚠️ Missing body color info:", err.message || err);
-    return false;
-  }
-}
+let referenceImage = null;
 
-function compareAvatars(target, reference) {
-  try {
-    if (target.shirtAssetId !== reference.shirtAssetId) return false;
-    if (target.pantsAssetId !== reference.pantsAssetId) return false;
-
-    const accA = [...target.accessoryAssetIds].sort();
-    const accB = [...reference.accessoryAssetIds].sort();
-    if (JSON.stringify(accA) !== JSON.stringify(accB)) return false;
-
-    if (!isGrayOrWhiteSkin(target)) return false;
-
-    return true;
-  } catch (err) {
-    console.error("❌ Error comparing avatars:", err.message || err);
-    return false;
-  }
-}
-
-async function getAvatar(userId) {
-  try {
-    const res = await axios.get(`https://avatar.roblox.com/v1/users/${userId}/avatar`);
-    return {
-      shirtAssetId: res.data.assets.find(a => a.assetType.id === 11)?.id || 0,
-      pantsAssetId: res.data.assets.find(a => a.assetType.id === 12)?.id || 0,
-      accessoryAssetIds: res.data.assets
-        .filter(a => a.assetType.name.toLowerCase().includes("accessory"))
-        .map(a => a.id),
-      headColorId: res.data.bodyColors?.headColorId || 0,
-      torsoColorId: res.data.bodyColors?.torsoColorId || 0,
-      leftArmColorId: res.data.bodyColors?.leftArmColorId || 0,
-      rightArmColorId: res.data.bodyColors?.rightArmColorId || 0,
-      leftLegColorId: res.data.bodyColors?.leftLegColorId || 0,
-      rightLegColorId: res.data.bodyColors?.rightLegColorId || 0,
-    };
-  } catch (err) {
-    console.warn(`⚠️ Failed to fetch avatar for userId ${userId}:`, err.message || err);
-    return null;
-  }
-}
-
-app.post("/check-avatar", async (req, res) => {
-  const { userId } = req.body;
-  if (!userId || typeof userId !== "number") {
-    return res.status(400).json({ error: "Missing or invalid userId" });
-  }
-
-  try {
-    const targetAvatar = await getAvatar(userId);
-    if (!targetAvatar) return res.status(500).json({ error: "Failed to get target avatar" });
-
-    for (const refId of referenceIds) {
-      const refAvatar = await getAvatar(refId);
-      if (!refAvatar) continue;
-
-      const match = compareAvatars(targetAvatar, refAvatar);
-      if (match) {
-        return res.json({ match: true });
-      }
-    }
-
-    res.json({ match: false });
-  } catch (err) {
-    console.error("❌ Server error:", err.message || err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+app.get("/", (req, res) => {
+    res.send("🟢 Girl Image Kicker (Gray Skin Compatible) is Running");
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Avatar checker running on port ${PORT}`));
+async function fetchAvatarHeadshot(userId) {
+    const url = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`;
+    const meta = await axios.get(url);
+    const imageURL = meta.data.data[0].imageUrl;
+    const imageBuffer = await axios.get(imageURL, { responseType: "arraybuffer" });
+    return imageBuffer.data;
+}
+
+function compareImages(refImg, targetImg, regionStart, regionEnd, threshold = 0.2, maxDiff = 0.1) {
+    const width = refImg.width;
+    const height = regionEnd - regionStart;
+
+    const refRegion = new PNG({ width, height });
+    const targetRegion = new PNG({ width, height });
+
+    for (let y = regionStart; y < regionEnd; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = (y * width + x) * 4;
+            const ri = ((y - regionStart) * width + x) * 4;
+            for (let c = 0; c < 4; c++) {
+                refRegion.data[ri + c] = refImg.data[i + c];
+                targetRegion.data[ri + c] = targetImg.data[i + c];
+            }
+        }
+    }
+
+    const diffPixels = pixelmatch(
+        refRegion.data,
+        targetRegion.data,
+        null,
+        width,
+        height,
+        { threshold }
+    );
+
+    const diffRatio = diffPixels / (width * height);
+    return diffRatio < maxDiff;
+}
+
+async function isCloneAvatar(targetBuffer) {
+    const [refGray, targetGray] = await Promise.all([
+        sharp(referenceImage).grayscale().png().toBuffer(),
+        sharp(targetBuffer).grayscale().png().toBuffer()
+    ]);
+
+    const refPNG = PNG.sync.read(refGray);
+    const targetPNG = PNG.sync.read(targetGray);
+
+    const matchHair = compareImages(refPNG, targetPNG, 0, 50);
+    const matchShirt = compareImages(refPNG, targetPNG, 50, 100);
+    const matchPants = compareImages(refPNG, targetPNG, 100, 150);
+
+    return matchHair && matchShirt && matchPants;
+}
+
+app.get("/compare/:userid", async (req, res) => {
+    const userId = req.params.userid;
+
+    try {
+        const targetImage = await fetchAvatarHeadshot(userId);
+        const isMatch = await isCloneAvatar(targetImage);
+        res.json({ match: isMatch });
+    } catch (err) {
+        console.error("❌ Error during comparison:", err.message);
+        res.status(500).json({ error: "Comparison failed", details: err.message });
+    }
+});
+
+app.listen(PORT, async () => {
+    console.log(`✅ Gray-Skin Image Kicker running on port ${PORT}`);
+    try {
+        referenceImage = await fetchAvatarHeadshot(REFERENCE_USER_ID);
+        console.log("✅ Reference avatar loaded (grayscale ready)");
+    } catch (err) {
+        console.error("❌ Failed to load reference image:", err.message);
+    }
+});

@@ -1,12 +1,16 @@
 {
-  "name": "avatar-checker",
-  "version": "1.0.1",
+  "name": "gray-girl-image-kicker",
+  "version": "1.0.0",
+  "description": "Image comparison-based Roblox bot kicker backend, tolerant of gray skin tones.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.6.8",
-    "express": "^4.18.2"
+    "express": "^4.19.2",
+    "pixelmatch": "^5.3.0",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.33.3"
   }
 }
